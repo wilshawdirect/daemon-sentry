@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "daemon-sentry"
+version = "0.1.0"
+description = "Cadence-relative liveness monitoring for daemon fleets - recomputes health from heartbeat evidence and catches green-but-dead status lies."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "ADZ"}]
+
+[project.urls]
+Repository = "https://github.com/Wilshawdirect/daemon-sentry"
+
+[tool.setuptools]
+packages = ["daemonsentry"]
