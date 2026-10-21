@@ -49,6 +49,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="emit JSON instead of a table")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="print full evidence and per-host detail")
+    p.add_argument("--pending", action="append", default=[], metavar="NAME=SECONDS|none",
+                   help="mark NAME as a work-driven daemon with its oldest pending input "
+                        "age in seconds (or 'none' when its input is empty); repeatable")
 
     sub.add_parser("selftest", help="run the offline self-test")
     return parser
@@ -66,11 +69,26 @@ def _census_exit_code(results: list[FleetVerdict]) -> int:
         return 2
     if VERDICT_LATE in verdicts:
         return 1
-    return 0   # healthy and pending (a new daemon inside its grace) both exit clean
+    return 0   # healthy, pending (a new daemon inside its grace) and idle (a work-driven daemon with no work) exit clean
+
+
+def _parse_pending(items: list[str]) -> dict[str, float | None]:
+    out: dict[str, float | None] = {}
+    for item in items:
+        name, sep, age = item.partition("=")
+        if not name or not sep:
+            raise ValueError(f"--pending expects NAME=SECONDS or NAME=none, got {item!r}")
+        out[name] = None if age.strip().lower() == "none" else float(age)
+    return out
 
 
 def _run_census(sentry: Sentry, args: argparse.Namespace) -> int:
-    results = sentry.census()
+    try:
+        pending_work = _parse_pending(args.pending) or None
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    results = sentry.census(pending_work=pending_work)
     if args.json:
         print(json.dumps([asdict(r) for r in results], indent=2))
     else:

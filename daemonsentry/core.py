@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 
 from .backends import Backend
 from .models import (
     VERDICT_CONFLICTED,
     VERDICT_DEAD,
     VERDICT_HEALTHY,
+    VERDICT_IDLE,
     VERDICT_LATE,
     VERDICT_PENDING,
     DaemonRow,
@@ -107,12 +109,22 @@ class Sentry:
         row.claimed_at = at
         self.backend.put(row)
 
-    def census(self, now: float | None = None) -> list[FleetVerdict]:
+    def census(self, now: float | None = None,
+               pending_work: Mapping[str, float | None] | None = None) -> list[FleetVerdict]:
         """Compute a fleet-wide health census from stored heartbeat evidence.
 
         Rows sharing a name are grouped across hosts; the fleet verdict is
         keyed to the freshest heartbeat (MAX across hosts), and per-host
         detail is preserved so a stale replica is still visible.
+
+        ``pending_work`` names the *work-driven* daemons, the ones that beat once
+        per item they process and so go quiet when their input is empty. Map each
+        to the age in seconds of its oldest pending input item, or ``None`` when
+        nothing is pending. A late or dead work-driven daemon whose input is empty
+        (or whose oldest item is younger than its own cadence) is ``idle``, not
+        dead. Pending work it is not touching keeps the late/dead verdict, and a
+        daemon you leave out of the mapping (say, because its queue could not be
+        read) is judged on heartbeats alone: an unreadable queue proves nothing.
         """
         now = time.time() if now is None else now
         by_name: dict[str, list[DaemonRow]] = {}
@@ -122,7 +134,7 @@ class Sentry:
         results: list[FleetVerdict] = []
         for name in sorted(by_name):
             rows = by_name[name]
-            verdicts = {row.host: self._classify_host(row, now) for row in rows}
+            verdicts = {row.host: self._classify_host(row, now, pending_work) for row in rows}
             freshest = max(
                 rows,
                 key=lambda r: r.last_beat_at if r.last_beat_at is not None else float("-inf"),
@@ -161,7 +173,8 @@ class Sentry:
             )
         return row
 
-    def _classify_host(self, row: DaemonRow, now: float) -> HostVerdict:
+    def _classify_host(self, row: DaemonRow, now: float,
+                       pending_work: Mapping[str, float | None] | None = None) -> HostVerdict:
         evidence: list[str] = []
         age: float | None
         ratio: float | None
@@ -192,6 +205,20 @@ class Sentry:
                 f"last heartbeat {format_age(age)} ago = {ratio:.1f}x its "
                 f"{format_age(row.cadence_s)} cadence"
             )
+
+        if pending_work is not None and row.name in pending_work and computed in (VERDICT_LATE, VERDICT_DEAD):
+            oldest = pending_work[row.name]
+            if oldest is None or oldest <= row.cadence_s:
+                evidence.append(
+                    "work-driven: no pending input" if oldest is None else
+                    f"work-driven: oldest pending item is only {format_age(oldest)} old"
+                )
+                computed = VERDICT_IDLE
+            else:
+                evidence.append(
+                    f"work-driven but its oldest pending item has waited {format_age(oldest)} "
+                    f"(more than one cadence): work it is not touching"
+                )
 
         error_active = row.last_error_at is not None and (
             row.last_ok_at is None or row.last_error_at > row.last_ok_at

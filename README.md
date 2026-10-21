@@ -87,12 +87,27 @@ evidence lines, and per-host detail.
 | `dead`       | heartbeat age > 3x cadence, or no heartbeat after the grace          |
 | `conflicted` | the stored status claim disagrees with the computed heartbeat truth  |
 | `pending`    | never beaten, registered under 2 cadences ago (new daemon)           |
+| `idle`       | a work-driven daemon, late or silent, whose input is empty           |
 
 Both factors are constructor arguments (`Sentry(backend, late_factor=1.5,
 dead_factor=3.0, new_daemon_grace=2.0)`) if your fleet needs a different tolerance.
 A daemon that has never beaten is `pending` for `new_daemon_grace` cadences after
 registration (it has not missed anything yet) and `dead` after that, so one that
 never starts cannot stay invisible.
+
+## Work-driven daemons
+
+Some daemons beat once per item they process, so an empty input queue makes them look dead while they are only idle.
+Tell the census which ones those are and how old their oldest pending item is:
+
+```python
+fleet = sentry.census(pending_work={"invoice-parser": None,        # nothing queued: idle, not dead
+                                    "image-resizer": 1800.0})      # oldest item waiting 30 min
+```
+
+or `python -m daemonsentry census --pending invoice-parser=none --pending image-resizer=1800`. A late or dead daemon with no
+pending input (or an oldest item younger than its own cadence) becomes `idle`; one that is ignoring waiting work stays
+`late`/`dead`, and one left out of the mapping is judged on heartbeats alone (an unreadable queue proves nothing).
 
 ## Architecture
 

@@ -8,6 +8,7 @@ VERDICT_LATE = "late"
 VERDICT_DEAD = "dead"
 VERDICT_CONFLICTED = "conflicted"
 VERDICT_PENDING = "pending"
+VERDICT_IDLE = "idle"
 
 
 @dataclass

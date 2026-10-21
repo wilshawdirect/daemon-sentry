@@ -72,7 +72,14 @@ def run_selftest() -> int:
     s.register("fresh-claims-green", cadence_s=300, at=_NOW - 60)
     s.claim("fresh-claims-green", "healthy", at=_NOW - 30)
 
+    # Lesson 6 — a daemon that beats once per item goes quiet when its input is empty
+    for name in ("item-processor", "stuck-processor", "unread-processor"):
+        s.register(name, cadence_s=60, at=_NOW - 30 * _DAY)
+        s.beat(name, at=_NOW - 2 * 3600)
+
     results = {r.name: r for r in s.census(now=_NOW)}
+    work = {r.name: r for r in s.census(
+        now=_NOW, pending_work={"item-processor": None, "stuck-processor": 1800.0, "weekly-digest": None})}
     s.close()
 
     print()
@@ -107,6 +114,15 @@ def run_selftest() -> int:
           results["never-started"].verdict == "dead")
     check("lesson 5: a green claim on a pending daemon is not a conflict",
           results["fresh-claims-green"].verdict == "pending")
+
+    check("lesson 6: a work-driven daemon with an empty input queue is IDLE, not DEAD",
+          work["item-processor"].verdict == "idle" and results["item-processor"].verdict == "dead")
+    check("lesson 6: pending input it has ignored for 30 min keeps it DEAD",
+          work["stuck-processor"].verdict == "dead")
+    check("lesson 6: a daemon with no queue reading is judged on heartbeats alone (still DEAD)",
+          work["unread-processor"].verdict == "dead")
+    check("lesson 6: a healthy daemon named as work-driven is untouched",
+          work["weekly-digest"].verdict == "healthy")
 
     # Backend round-trips (atomic writes + reopen from disk)
     with tempfile.TemporaryDirectory() as tmp:
