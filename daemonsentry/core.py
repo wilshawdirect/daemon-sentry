@@ -12,6 +12,7 @@ from .models import (
     VERDICT_IDLE,
     VERDICT_LATE,
     VERDICT_PENDING,
+    VERDICT_RETIRED,
     DaemonRow,
     FleetVerdict,
     HostVerdict,
@@ -84,12 +85,35 @@ class Sentry:
         self.backend.put(row)
 
     def beat(self, name: str, host: str = DEFAULT_HOST, at: float | None = None) -> None:
-        """Record a successful heartbeat for (name, host)."""
+        """Record a successful heartbeat for (name, host). A heartbeat is evidence of life, so it also ends a retirement."""
         at = time.time() if at is None else at
         row = self._require(name, host)
         row.last_beat_at = at
         row.last_ok_at = at
+        row.retired_at = None
         self.backend.put(row)
+
+    def retire(self, name: str, host: str | None = None, at: float | None = None) -> int:
+        """Mark a daemon as decommissioned (on one host, or on every host when ``host`` is None).
+
+        A retired row stays in the store as history but reads ``retired`` instead of ``dead``, so a daemon you moved or switched
+        off stops failing every census. Returns the number of rows retired; raises KeyError if none matched.
+        """
+        return self._set_retired(name, host, time.time() if at is None else at)
+
+    def unretire(self, name: str, host: str | None = None) -> int:
+        """Undo :meth:`retire`; the row is judged on its heartbeats again."""
+        return self._set_retired(name, host, None)
+
+    def _set_retired(self, name: str, host: str | None, at: float | None) -> int:
+        rows = [r for r in self.backend.all_rows() if r.name == name and (host is None or r.host == host)]
+        if not rows:
+            where = f" on host {host!r}" if host is not None else ""
+            raise KeyError(f"daemon {name!r}{where} is not registered - call register() first")
+        for row in rows:
+            row.retired_at = at
+            self.backend.put(row)
+        return len(rows)
 
     def report_error(self, name: str, message: str, host: str = DEFAULT_HOST,
                      at: float | None = None) -> None:
@@ -135,19 +159,24 @@ class Sentry:
         for name in sorted(by_name):
             rows = by_name[name]
             verdicts = {row.host: self._classify_host(row, now, pending_work) for row in rows}
+            # retired rows are history: they never speak for the fleet while an active row exists
+            live = [r for r in rows if r.retired_at is None] or rows
             freshest = max(
-                rows,
+                live,
                 key=lambda r: r.last_beat_at if r.last_beat_at is not None else float("-inf"),
             )
             top = verdicts[freshest.host]
             evidence = list(top.evidence)
+            retired_hosts = [r.host for r in rows if r.retired_at is not None and r.host != freshest.host]
+            if retired_hosts:
+                evidence.append(f"retired host row(s) ignored: {', '.join(sorted(retired_hosts))}")
             if len(rows) > 1:
                 evidence.append(
                     f"{len(rows)} hosts share this name; fleet verdict keyed to freshest "
                     f"({freshest.host}) - a name-only single-row lookup is a coin flip"
                 )
                 for hv in verdicts.values():
-                    if hv.host != freshest.host and hv.verdict != top.verdict:
+                    if hv.host != freshest.host and hv.verdict != top.verdict and hv.verdict != VERDICT_RETIRED:
                         evidence.append(f"host {hv.host} disagrees: {hv.verdict} ({hv.evidence[0]})")
             results.append(FleetVerdict(
                 name=name,
@@ -176,6 +205,13 @@ class Sentry:
     def _classify_host(self, row: DaemonRow, now: float,
                        pending_work: Mapping[str, float | None] | None = None) -> HostVerdict:
         evidence: list[str] = []
+        if row.retired_at is not None:
+            age = None if row.last_beat_at is None else now - row.last_beat_at
+            evidence.append(f"retired {format_age(now - row.retired_at)} ago; kept as history, not judged "
+                            "(a fresh heartbeat or unretire() ends the retirement)")
+            return HostVerdict(host=row.host, verdict=VERDICT_RETIRED, age_s=age,
+                               ratio=None if age is None else age / row.cadence_s,
+                               claimed_status=row.claimed_status, error_active=False, evidence=evidence)
         age: float | None
         ratio: float | None
         if row.last_beat_at is None:

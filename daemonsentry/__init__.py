@@ -8,6 +8,7 @@ from .models import (
     VERDICT_IDLE,
     VERDICT_LATE,
     VERDICT_PENDING,
+    VERDICT_RETIRED,
     DaemonRow,
     FleetVerdict,
     HostVerdict,
@@ -30,6 +31,7 @@ __all__ = [
     "VERDICT_IDLE",
     "VERDICT_LATE",
     "VERDICT_PENDING",
+    "VERDICT_RETIRED",
     "format_age",
     "format_table",
 ]

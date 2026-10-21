@@ -88,6 +88,7 @@ evidence lines, and per-host detail.
 | `conflicted` | the stored status claim disagrees with the computed heartbeat truth  |
 | `pending`    | never beaten, registered under 2 cadences ago (new daemon)           |
 | `idle`       | a work-driven daemon, late or silent, whose input is empty           |
+| `retired`    | decommissioned on purpose; kept as history, never judged             |
 
 Both factors are constructor arguments (`Sentry(backend, late_factor=1.5,
 dead_factor=3.0, new_daemon_grace=2.0)`) if your fleet needs a different tolerance.
@@ -109,13 +110,20 @@ or `python -m daemonsentry census --pending invoice-parser=none --pending image-
 pending input (or an oldest item younger than its own cadence) becomes `idle`; one that is ignoring waiting work stays
 `late`/`dead`, and one left out of the mapping is judged on heartbeats alone (an unreadable queue proves nothing).
 
+## Retiring a daemon
+
+A daemon you switched off, or moved to another host, would otherwise fail every census for ever (or leave a dead ghost row
+next to the live one). `sentry.retire("invoice-mailer")` (CLI: `retire NAME [--host H]`) marks the row `retired`: it stays in the
+store as history, reads `retired`, exits clean, and never speaks for the fleet while another host's row is active. A fresh
+heartbeat or `unretire()` ends the retirement. Stores written before this existed are migrated in place.
+
 ## Architecture
 
 ```
 daemonsentry/
   models.py    dataclasses: DaemonRow (stored), HostVerdict / FleetVerdict (computed)
   backends.py  storage: Backend ABC + SQLiteBackend + JSONFileBackend (atomic writes)
-  core.py      Sentry: register / beat / report_error / claim / census
+  core.py      Sentry: register / beat / report_error / claim / retire / census
   selftest.py  offline synthetic fleet exercising all four failure modes
   __main__.py  CLI
 ```

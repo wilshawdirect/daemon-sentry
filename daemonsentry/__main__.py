@@ -53,6 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="mark NAME as a work-driven daemon with its oldest pending input "
                         "age in seconds (or 'none' when its input is empty); repeatable")
 
+    p = sub.add_parser("retire", help="mark a decommissioned daemon as retired (kept as history, not judged)")
+    p.add_argument("name")
+    p.add_argument("--host", default=None, help="retire only this host's row (default: every host)")
+
+    p = sub.add_parser("unretire", help="undo a retirement")
+    p.add_argument("name")
+    p.add_argument("--host", default=None)
+
     sub.add_parser("selftest", help="run the offline self-test")
     return parser
 
@@ -69,7 +77,7 @@ def _census_exit_code(results: list[FleetVerdict]) -> int:
         return 2
     if VERDICT_LATE in verdicts:
         return 1
-    return 0   # healthy, pending (a new daemon inside its grace) and idle (a work-driven daemon with no work) exit clean
+    return 0   # healthy, pending (a new daemon inside its grace), idle (a work-driven daemon with no work) and retired exit clean
 
 
 def _parse_pending(items: list[str]) -> dict[str, float | None]:
@@ -129,6 +137,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "claim":
             sentry.claim(args.name, args.status, host=args.host)
             print(f"claimed status '{args.status}' recorded for {args.name} on {args.host}")
+        elif args.command == "retire":
+            n = sentry.retire(args.name, host=args.host)
+            print(f"retired {n} row(s) for {args.name}")
+        elif args.command == "unretire":
+            n = sentry.unretire(args.name, host=args.host)
+            print(f"unretired {n} row(s) for {args.name}")
         else:
             return _run_census(sentry, args)
     except KeyError as exc:

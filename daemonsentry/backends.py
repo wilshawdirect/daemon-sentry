@@ -17,7 +17,7 @@ from .models import DaemonRow
 
 _COLS = (
     "name", "host", "cadence_s", "registered_at", "last_beat_at",
-    "last_ok_at", "last_error", "last_error_at", "claimed_status", "claimed_at",
+    "last_ok_at", "last_error", "last_error_at", "claimed_status", "claimed_at", "retired_at",
 )
 
 _SCHEMA = """
@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS daemons (
     last_error_at REAL,
     claimed_status TEXT,
     claimed_at REAL,
+    retired_at REAL,
     PRIMARY KEY (name, host)
 )
 """
@@ -66,6 +67,10 @@ class SQLiteBackend(Backend):
     def __init__(self, path: str = "daemonsentry.db") -> None:
         self._conn = sqlite3.connect(path)
         self._conn.execute(_SCHEMA)
+        # a store created before retirement existed gains the column in place
+        have = {r[1] for r in self._conn.execute("PRAGMA table_info(daemons)")}
+        if "retired_at" not in have:
+            self._conn.execute("ALTER TABLE daemons ADD COLUMN retired_at REAL")
         self._conn.commit()
 
     def get(self, name: str, host: str) -> DaemonRow | None:

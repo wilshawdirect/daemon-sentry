@@ -7,6 +7,7 @@ reference instant so the output is deterministic.
 from __future__ import annotations
 
 import os
+import sqlite3
 import tempfile
 
 from .backends import JSONFileBackend, SQLiteBackend
@@ -77,6 +78,19 @@ def run_selftest() -> int:
         s.register(name, cadence_s=60, at=_NOW - 30 * _DAY)
         s.beat(name, at=_NOW - 2 * 3600)
 
+    # Lesson 7 — a daemon you switched off, or moved to another host, must stop failing every census
+    s.register("old-exporter", cadence_s=300, at=_NOW - 60 * _DAY)
+    s.beat("old-exporter", at=_NOW - 40 * _DAY)
+    s.retire("old-exporter", at=_NOW - 39 * _DAY)
+    s.register("moved-worker", cadence_s=300, host="old-box", at=_NOW - 60 * _DAY)
+    s.beat("moved-worker", host="old-box", at=_NOW - 20 * _DAY)
+    s.register("moved-worker", cadence_s=300, host="new-box", at=_NOW - 10 * _DAY)
+    s.beat("moved-worker", host="new-box", at=_NOW - 60)
+    s.retire("moved-worker", host="old-box", at=_NOW - 10 * _DAY)
+    s.register("revived", cadence_s=300, at=_NOW - 60 * _DAY)
+    s.retire("revived", at=_NOW - 30 * _DAY)
+    s.beat("revived", at=_NOW - 60)
+
     results = {r.name: r for r in s.census(now=_NOW)}
     work = {r.name: r for r in s.census(
         now=_NOW, pending_work={"item-processor": None, "stuck-processor": 1800.0, "weekly-digest": None})}
@@ -124,6 +138,20 @@ def run_selftest() -> int:
     check("lesson 6: a healthy daemon named as work-driven is untouched",
           work["weekly-digest"].verdict == "healthy")
 
+    check("lesson 7: a retired daemon reads RETIRED, not DEAD",
+          results["old-exporter"].verdict == "retired")
+    moved = results["moved-worker"]
+    check("lesson 7: a retired ghost row on the old host no longer speaks for the fleet",
+          moved.verdict == "healthy" and moved.freshest_host == "new-box"
+          and not any("disagrees" in line for line in moved.evidence))
+    check("lesson 7: a fresh heartbeat ends a retirement",
+          results["revived"].verdict == "healthy")
+    try:
+        Sentry(SQLiteBackend(":memory:")).retire("never-registered")
+        check("lesson 7: retiring an unregistered daemon raises KeyError", False)
+    except KeyError:
+        check("lesson 7: retiring an unregistered daemon raises KeyError", True)
+
     # Backend round-trips (atomic writes + reopen from disk)
     with tempfile.TemporaryDirectory() as tmp:
         jpath = os.path.join(tmp, "fleet.json")
@@ -145,6 +173,23 @@ def run_selftest() -> int:
         ds2.close()
         check("sqlite backend: on-disk round-trip",
               len(reread2) == 1 and reread2[0].verdict == "healthy")
+
+        # a store written before retirement existed is migrated in place
+        old = os.path.join(tmp, "old.db")
+        conn = sqlite3.connect(old)
+        conn.execute("CREATE TABLE daemons (name TEXT NOT NULL, host TEXT NOT NULL, cadence_s REAL NOT NULL, "
+                     "registered_at REAL NOT NULL, last_beat_at REAL, last_ok_at REAL, last_error TEXT, "
+                     "last_error_at REAL, claimed_status TEXT, claimed_at REAL, PRIMARY KEY (name, host))")
+        conn.execute("INSERT INTO daemons (name, host, cadence_s, registered_at, last_beat_at) VALUES "
+                     "('legacy', 'default', 60, ?, ?)", (_NOW - 600, _NOW - 30))
+        conn.commit()
+        conn.close()
+        migrated = Sentry(SQLiteBackend(old))
+        migrated.retire("legacy", at=_NOW)
+        verdict = migrated.census(now=_NOW + 1)[0].verdict
+        migrated.close()
+        check("sqlite backend: a pre-retirement store is migrated in place",
+              verdict == "retired")
 
     print()
     if failures:

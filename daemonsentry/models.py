@@ -9,6 +9,7 @@ VERDICT_DEAD = "dead"
 VERDICT_CONFLICTED = "conflicted"
 VERDICT_PENDING = "pending"
 VERDICT_IDLE = "idle"
+VERDICT_RETIRED = "retired"
 
 
 @dataclass
@@ -29,6 +30,7 @@ class DaemonRow:
     last_error_at: float | None = None
     claimed_status: str | None = None
     claimed_at: float | None = None
+    retired_at: float | None = None
 
 
 @dataclass
