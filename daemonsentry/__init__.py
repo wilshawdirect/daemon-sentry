@@ -6,6 +6,7 @@ from .models import (
     VERDICT_DEAD,
     VERDICT_HEALTHY,
     VERDICT_LATE,
+    VERDICT_PENDING,
     DaemonRow,
     FleetVerdict,
     HostVerdict,
@@ -26,6 +27,7 @@ __all__ = [
     "VERDICT_DEAD",
     "VERDICT_HEALTHY",
     "VERDICT_LATE",
+    "VERDICT_PENDING",
     "format_age",
     "format_table",
 ]

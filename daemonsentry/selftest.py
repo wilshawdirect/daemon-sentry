@@ -1,4 +1,4 @@
-"""Offline self-test: a synthetic fleet exhibiting all four failure modes.
+"""Offline self-test: a synthetic fleet exhibiting the failure modes.
 
 Run with ``python -m daemonsentry --self-test``. No network, no external
 services — the fleet is built in memory and in temp files, at a fixed
@@ -66,6 +66,12 @@ def run_selftest() -> int:
     s.beat("sync-agent", host="host-a", at=_NOW - _DAY)
     s.beat("sync-agent", host="host-b", at=_NOW - 60)
 
+    # Lesson 5 — a daemon registered a moment ago has not missed anything yet
+    s.register("fresh-worker", cadence_s=300, at=_NOW - 120)
+    s.register("never-started", cadence_s=300, at=_NOW - 2 * 3600)
+    s.register("fresh-claims-green", cadence_s=300, at=_NOW - 60)
+    s.claim("fresh-claims-green", "healthy", at=_NOW - 30)
+
     results = {r.name: r for r in s.census(now=_NOW)}
     s.close()
 
@@ -94,6 +100,13 @@ def run_selftest() -> int:
     host_a = next(h for h in sync.hosts if h.host == "host-a")
     check("lesson 4: per-host detail still exposes host-a as DEAD",
           host_a.verdict == "dead")
+
+    check("lesson 5: registered 2 min ago with a 5-minute cadence is PENDING, not DEAD",
+          results["fresh-worker"].verdict == "pending")
+    check("lesson 5: never beaten and 2 hours past registration is DEAD",
+          results["never-started"].verdict == "dead")
+    check("lesson 5: a green claim on a pending daemon is not a conflict",
+          results["fresh-claims-green"].verdict == "pending")
 
     # Backend round-trips (atomic writes + reopen from disk)
     with tempfile.TemporaryDirectory() as tmp:

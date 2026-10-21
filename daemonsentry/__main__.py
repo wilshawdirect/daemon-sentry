@@ -66,7 +66,7 @@ def _census_exit_code(results: list[FleetVerdict]) -> int:
         return 2
     if VERDICT_LATE in verdicts:
         return 1
-    return 0
+    return 0   # healthy and pending (a new daemon inside its grace) both exit clean
 
 
 def _run_census(sentry: Sentry, args: argparse.Namespace) -> int:

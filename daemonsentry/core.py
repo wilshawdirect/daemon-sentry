@@ -9,6 +9,7 @@ from .models import (
     VERDICT_DEAD,
     VERDICT_HEALTHY,
     VERDICT_LATE,
+    VERDICT_PENDING,
     DaemonRow,
     FleetVerdict,
     HostVerdict,
@@ -53,12 +54,19 @@ class Sentry:
     are multiples of each daemon's *own* cadence: heartbeat age up to
     ``late_factor`` x cadence is healthy, up to ``dead_factor`` x cadence is
     late, beyond that is dead.
+
+    A daemon that has never beaten is ``pending`` until ``new_daemon_grace``
+    cadences have passed since it was registered, then ``dead``: a freshly
+    registered daemon misses its first slots by design, but one that never
+    starts must not stay invisible.
     """
 
-    def __init__(self, backend: Backend, late_factor: float = 1.5, dead_factor: float = 3.0) -> None:
+    def __init__(self, backend: Backend, late_factor: float = 1.5, dead_factor: float = 3.0,
+                 new_daemon_grace: float = 2.0) -> None:
         self.backend = backend
         self.late_factor = late_factor
         self.dead_factor = dead_factor
+        self.new_daemon_grace = new_daemon_grace
 
     def register(self, name: str, cadence_s: float, host: str = DEFAULT_HOST,
                  at: float | None = None) -> None:
@@ -158,10 +166,19 @@ class Sentry:
         age: float | None
         ratio: float | None
         if row.last_beat_at is None:
-            computed, age, ratio = VERDICT_DEAD, None, None
-            evidence.append(
-                f"no heartbeat ever recorded (registered {format_age(now - row.registered_at)} ago)"
-            )
+            since_registered = now - row.registered_at
+            age, ratio = None, None
+            if since_registered <= self.new_daemon_grace * row.cadence_s:
+                computed = VERDICT_PENDING
+                evidence.append(
+                    f"no heartbeat yet (registered {format_age(since_registered)} ago, within the "
+                    f"{self.new_daemon_grace:g}-cadence grace for a new daemon)"
+                )
+            else:
+                computed = VERDICT_DEAD
+                evidence.append(
+                    f"no heartbeat ever recorded (registered {format_age(since_registered)} ago)"
+                )
         else:
             age = now - row.last_beat_at
             ratio = age / row.cadence_s

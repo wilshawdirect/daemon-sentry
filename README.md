@@ -84,11 +84,15 @@ evidence lines, and per-host detail.
 | ------------ | -------------------------------------------------------------------- |
 | `healthy`    | heartbeat age ≤ 1.5x the daemon's own cadence                        |
 | `late`       | heartbeat age ≤ 3x cadence — worth watching, not yet an incident     |
-| `dead`       | heartbeat age > 3x cadence, or no heartbeat ever recorded            |
+| `dead`       | heartbeat age > 3x cadence, or no heartbeat after the grace          |
 | `conflicted` | the stored status claim disagrees with the computed heartbeat truth  |
+| `pending`    | never beaten, registered under 2 cadences ago (new daemon)           |
 
 Both factors are constructor arguments (`Sentry(backend, late_factor=1.5,
-dead_factor=3.0)`) if your fleet needs a different tolerance.
+dead_factor=3.0, new_daemon_grace=2.0)`) if your fleet needs a different tolerance.
+A daemon that has never beaten is `pending` for `new_daemon_grace` cadences after
+registration (it has not missed anything yet) and `dead` after that, so one that
+never starts cannot stay invisible.
 
 ## Architecture
 

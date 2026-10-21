@@ -7,6 +7,7 @@ VERDICT_HEALTHY = "healthy"
 VERDICT_LATE = "late"
 VERDICT_DEAD = "dead"
 VERDICT_CONFLICTED = "conflicted"
+VERDICT_PENDING = "pending"
 
 
 @dataclass
